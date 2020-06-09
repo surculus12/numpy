@@ -66,7 +66,8 @@ add_docstring(
     """)
 
 
-ArgSpec = collections.namedtuple('ArgSpec', 'args varargs keywords defaults')
+ArgSpec = collections.namedtuple(
+    'ArgSpec', 'args kwonlyargs varargs keywords defaults kwonlydefaults')
 
 
 def verify_matching_signatures(implementation, dispatcher):
@@ -75,13 +76,19 @@ def verify_matching_signatures(implementation, dispatcher):
     dispatcher_spec = ArgSpec(*getargspec(dispatcher))
 
     if (implementation_spec.args != dispatcher_spec.args or
+            implementation_spec.kwonlyargs != dispatcher_spec.kwonlyargs or
             implementation_spec.varargs != dispatcher_spec.varargs or
             implementation_spec.keywords != dispatcher_spec.keywords or
             (bool(implementation_spec.defaults) !=
              bool(dispatcher_spec.defaults)) or
             (implementation_spec.defaults is not None and
              len(implementation_spec.defaults) !=
-             len(dispatcher_spec.defaults))):
+             len(dispatcher_spec.defaults)) or
+            (bool(implementation_spec.kwonlydefaults) !=
+             bool(dispatcher_spec.kwonlydefaults)) or
+            (implementation_spec.kwonlydefaults is not None and
+             len(implementation_spec.kwonlydefaults) !=
+             len(dispatcher_spec.kwonlydefaults))):
         raise RuntimeError('implementation and dispatcher for %s have '
                            'different function signatures' % implementation)
 

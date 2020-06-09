@@ -262,9 +262,11 @@ class TestVerifyMatchingSignatures:
         with assert_raises(RuntimeError):
             verify_matching_signatures(lambda x=None: 0, lambda y=None: 0)
         with assert_raises(RuntimeError):
-            verify_matching_signatures(lambda x=1: 0, lambda y=1: 0)
+            verify_matching_signatures(lambda x=1: 0, lambda y=None: 0)
         with assert_raises(RuntimeError):
-            verify_matching_signatures(lambda *, x=1:0, lambda *, y=1: 0)
+            verify_matching_signatures(lambda *, x=1: 0, lambda *, y=None: 0)
+        with assert_raises(RuntimeError):
+            verify_matching_signatures(lambda a, *, x=1: 0, lambda a, x=None: 0)
 
     def test_array_function_dispatch(self):
 

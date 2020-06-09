@@ -65,8 +65,9 @@ CO_OPTIMIZED, CO_NEWLOCALS, CO_VARARGS, CO_VARKEYWORDS = 1, 2, 4, 8
 def getargs(co):
     """Get information about the arguments accepted by a code object.
 
-    Three things are returned: (args, varargs, varkw), where 'args' is
-    a list of argument names (possibly containing nested lists), and
+    Four things are returned: (args, kwonlyargs, varargs, varkw), where 'args'
+    is a list of argument names (possibly containing nested lists),
+    'kwonlyargs' is a list of keyword-only argument names, and
     'varargs' and 'varkw' are the names of the * and ** arguments or None.
 
     """
@@ -74,7 +75,8 @@ def getargs(co):
     if not iscode(co):
         raise TypeError('arg is not a code object')
 
-    nargs = co.co_argcount + co.co_kwonlyargcount
+    nargs = co.co_argcount
+    nkwonlyargs = co.co_kwonlyargcount
     names = co.co_varnames
     args = list(names[:nargs])
 
@@ -84,6 +86,8 @@ def getargs(co):
     for i in range(nargs):
         if args[i][:1] in ['', '.']:
             raise TypeError("tuple function arguments are not supported")
+    kwonlyargs = list(names[nargs:nargs+nkwonlyargs])
+    nargs += nkwonlyargs
     varargs = None
     if co.co_flags & CO_VARARGS:
         varargs = co.co_varnames[nargs]
@@ -91,41 +95,46 @@ def getargs(co):
     varkw = None
     if co.co_flags & CO_VARKEYWORDS:
         varkw = co.co_varnames[nargs]
-    return args, varargs, varkw
+    return args, kwonlyargs, varargs, varkw
 
 def getargspec(func):
     """Get the names and default values of a function's arguments.
 
-    A tuple of four things is returned: (args, varargs, varkw, defaults).
+    A tuple of six things is returned:
+    (args, kwonlyargs, varargs, varkw, defaults, kwonlydefaults).
     'args' is a list of the argument names (it may contain nested lists).
+    'kwonlyargs' is a list of keyword-only argument names.
     'varargs' and 'varkw' are the names of the * and ** arguments or None.
     'defaults' is an n-tuple of the default values of the last n arguments.
-
+    'kwonlydefaults' is an n-tuple of the default values of the last n
+    keyword-only arguments.
     """
 
     if ismethod(func):
         func = func.__func__
     if not isfunction(func):
         raise TypeError('arg is not a Python function')
-    args, varargs, varkw = getargs(func.__code__)
+    args, kwonlyargs, varargs, varkw = getargs(func.__code__)
     defaults = func.__defaults__
-    if func.__kwdefaults__:
-        if not defaults:
-            defaults = tuple()
-        defaults += tuple(func.__kwdefaults__.values())
-    return args, varargs, varkw, defaults
+    try:
+        kwonlydefaults = tuple(func.__kwdefaults__.values())
+    except AttributeError:
+        kwonlydefaults = None
+    return args, kwonlyargs, varargs, varkw, defaults, kwonlydefaults
 
 def getargvalues(frame):
     """Get information about arguments passed into a particular frame.
 
-    A tuple of four things is returned: (args, varargs, varkw, locals).
+    A tuple of five things is returned: (args, kwonlyargs, varargs, varkw,
+    locals).
     'args' is a list of the argument names (it may contain nested lists).
+    'kwonlyargs' is a list of keyword-only argument names.
     'varargs' and 'varkw' are the names of the * and ** arguments or None.
     'locals' is the locals dictionary of the given frame.
     
     """
-    args, varargs, varkw = getargs(frame.f_code)
-    return args, varargs, varkw, frame.f_locals
+    args, kwonlyargs, varargs, varkw = getargs(frame.f_code)
+    return args, kwonlyargs, varargs, varkw, frame.f_locals
 
 def joinseq(seq):
     if len(seq) == 1:
@@ -142,21 +151,8 @@ def strseq(object, convert, join=joinseq):
     else:
         return convert(object)
 
-def formatargspec(args, varargs=None, varkw=None, defaults=None,
-                  formatarg=str,
-                  formatvarargs=lambda name: '*' + name,
-                  formatvarkw=lambda name: '**' + name,
-                  formatvalue=lambda value: '=' + repr(value),
-                  join=joinseq):
-    """Format an argument spec from the 4 values returned by getargspec.
-
-    The first four arguments are (args, varargs, varkw, defaults).  The
-    other four arguments are the corresponding optional formatting functions
-    that are called to turn names and values into strings.  The ninth
-    argument is an optional function to format the sequence of arguments.
-
-    """
-    specs = []
+def formatdefaultargs(args, defaults, formatarg, formatvalue, join):
+    specs = list()
     if defaults:
         firstdefault = len(args) - len(defaults)
     for i in range(len(args)):
@@ -164,23 +160,49 @@ def formatargspec(args, varargs=None, varkw=None, defaults=None,
         if defaults and i >= firstdefault:
             spec = spec + formatvalue(defaults[i - firstdefault])
         specs.append(spec)
+    return specs
+
+def formatargspec(args, kwonlyargs=None, varargs=None, varkw=None,
+                  defaults=None, kwonlydefaults=None,
+                  formatarg=str,
+                  formatvarargs=lambda name: '*' + name,
+                  formatvarkw=lambda name: '**' + name,
+                  formatvalue=lambda value: '=' + repr(value),
+                  join=joinseq):
+    """Format an argument spec from the 6 values returned by getargspec.
+
+    The first four arguments are (args, kwonlyargs, varargs, varkw, defaults,
+    kwonlydefaults).  The other four arguments are the corresponding optional
+    formatting functions that are called to turn names and values into strings.
+    The elleventh argument is an optional function to format the sequence of
+    arguments.
+
+    """
+    specs = []
+    specs.extend(formatdefaultargs(args, defaults, formatarg, formatvalue,
+                                   join))
     if varargs is not None:
         specs.append(formatvarargs(varargs))
+    if kwonlyargs is not None:
+        if varargs is None:
+            specs.append(formatvarargs(''))
+        specs.extend(formatdefaultargs(kwonlyargs, kwonlydefaults, formatarg,
+                                       formatvalue, join))
     if varkw is not None:
         specs.append(formatvarkw(varkw))
     return '(' + ', '.join(specs) + ')'
 
-def formatargvalues(args, varargs, varkw, locals,
+def formatargvalues(args, kwonlyargs, varargs, varkw, locals,
                     formatarg=str,
                     formatvarargs=lambda name: '*' + name,
                     formatvarkw=lambda name: '**' + name,
                     formatvalue=lambda value: '=' + repr(value),
                     join=joinseq):
-    """Format an argument spec from the 4 values returned by getargvalues.
+    """Format an argument spec from the 5 values returned by getargvalues.
 
-    The first four arguments are (args, varargs, varkw, locals).  The
-    next four arguments are the corresponding optional formatting functions
-    that are called to turn names and values into strings.  The ninth
+    The first five arguments are (args, kwonlyargs, varargs, varkw, locals).
+    The next four arguments are the corresponding optional formatting functions
+    that are called to turn names and values into strings.  The tenth
     argument is an optional function to format the sequence of arguments.
 
     """
@@ -191,6 +213,7 @@ def formatargvalues(args, varargs, varkw, locals,
 
     if varargs:
         specs.append(formatvarargs(varargs) + formatvalue(locals[varargs]))
+    specs += [strseq(kwonlyarg, convert, join) for kwonlyarg in kwonlyargs]
     if varkw:
         specs.append(formatvarkw(varkw) + formatvalue(locals[varkw]))
     return '(' + ', '.join(specs) + ')'
